@@ -73,6 +73,11 @@ class DatasetParser:
 
         train_detected_columns = self._detect_columns(train_df)
 
+        train_statistics = self._calculate_dataset_statistics(
+            dataframe=train_df,
+            label_column=train_detected_columns["label"],
+        )
+
         train_image_check = self._check_image_consistency(
             dataframe=train_df,
             image_folder=self.train_image_folder,
@@ -86,6 +91,7 @@ class DatasetParser:
                 "image_folder": str(self.train_image_folder),
                 "csv_file": str(self.train_csv_file),
                 "detected_columns": train_detected_columns,
+                "statistics": train_statistics,
                 "image_check": train_image_check,
             },
             "test": None,
@@ -95,6 +101,11 @@ class DatasetParser:
             test_df = pd.read_csv(self.test_csv_file)
 
             test_detected_columns = self._detect_columns(test_df)
+
+            test_statistics = self._calculate_dataset_statistics(
+                dataframe=test_df,
+                label_column=test_detected_columns["label"],
+            )
 
             test_image_check = self._check_image_consistency(
                 dataframe=test_df,
@@ -108,6 +119,7 @@ class DatasetParser:
                 "image_folder": str(self.test_image_folder),
                 "csv_file": str(self.test_csv_file),
                 "detected_columns": test_detected_columns,
+                "statistics": test_statistics,
                 "image_check": test_image_check,
             }
 
@@ -253,4 +265,34 @@ class DatasetParser:
             "missing_images": missing_images,
             "unused_images": unused_images,
             "status": status,
+        }
+    
+
+    def _calculate_dataset_statistics(
+        self,
+        dataframe,
+        label_column,
+    ):
+        if label_column is None:
+            return {
+                "num_classes": 0,
+                "class_distribution": {},
+                "status": "Label column not detected",
+            }
+
+        label_counts = (
+            dataframe[label_column]
+            .dropna()
+            .value_counts()
+        )
+
+        class_distribution = {
+            str(label): int(count)
+            for label, count in label_counts.items()
+        }
+
+        return {
+            "num_classes": len(class_distribution),
+            "class_distribution": class_distribution,
+            "status": "OK",
         }

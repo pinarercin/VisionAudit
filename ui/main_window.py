@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QPlainTextEdit,
     QPushButton,
     QSizePolicy,
     QTabWidget,
@@ -332,7 +333,19 @@ class MainWindow(QMainWindow):
             f"Missing images: {len(result['train']['image_check']['missing_images'])}",
             f"Unused images: {len(result['train']['image_check']['unused_images'])}",
             f"Status: {result['train']['image_check']['status']}",
+
+            "",
+            "Dataset Statistics",
+            f"Number of classes: {result['train']['statistics']['num_classes']}",
+            "",
+            "Class Distribution",
+
         ]
+        
+        for label, count in (
+            result["train"]["statistics"]["class_distribution"].items()
+        ):
+            summary_lines.append(f"{label}: {count}")
 
         if result["test"] is not None:
             summary_lines.extend(
@@ -366,15 +379,13 @@ class MainWindow(QMainWindow):
             if widget is not None:
                 widget.deleteLater()
 
-        label = QLabel(text)
-        label.setWordWrap(True)
-        label.setAlignment(
-            Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft
-        )
-        label.setStyleSheet(
-            "font-size: 14px; padding: 16px;"
+        summary_text = QPlainTextEdit()
+        summary_text.setPlainText(text)
+        summary_text.setReadOnly(True)
+        summary_text.setStyleSheet(
+            "font-size: 14px; padding: 12px;"
         )
 
-        layout.addWidget(label)
+        layout.addWidget(summary_text)
 
         self.result_tabs.setCurrentWidget(self.summary_tab)
