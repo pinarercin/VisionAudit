@@ -2,6 +2,9 @@ from pathlib import Path
 
 import pandas as pd
 
+from analysis.phash_duplicate_analyzer import (
+    PHashDuplicateAnalyzer,
+)
 
 class DatasetParser:
 
@@ -84,6 +87,12 @@ class DatasetParser:
             image_column=train_detected_columns["image"],
         )
 
+        train_duplicate_analysis = (
+            PHashDuplicateAnalyzer().analyze(
+                image_folder=self.train_image_folder,
+            )
+        )
+
         result = {
             "train": {
                 "num_rows": len(train_df),
@@ -93,6 +102,7 @@ class DatasetParser:
                 "detected_columns": train_detected_columns,
                 "statistics": train_statistics,
                 "image_check": train_image_check,
+                "duplicates": train_duplicate_analysis,
             },
             "test": None,
         }

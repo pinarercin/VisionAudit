@@ -2,3 +2,7 @@ PySide6==6.11.1
 PySide6_Addons==6.11.1
 PySide6_Essentials==6.11.1
 shiboken6==6.11.1
+
+pandas==3.0.3
+Pillow==12.3.0
+ImageHash==4.3.2

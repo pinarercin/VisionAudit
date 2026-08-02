@@ -1,5 +1,7 @@
 from parsers.dataset_parser import DatasetParser
+from PIL import Image
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QFileDialog,
@@ -14,6 +16,9 @@ from PySide6.QtWidgets import (
     QTabWidget,
     QVBoxLayout,
     QWidget,
+    QScrollArea,
+    QGridLayout,
+    QApplication,
 )
 
 
@@ -297,77 +302,95 @@ class MainWindow(QMainWindow):
 
     
     def _run_analysis(self):
-        parser = DatasetParser(
-            train_image_folder=self.train_image_folder_input.text().strip(),
-            train_csv_file=self.train_csv_input.text().strip(),
-            test_image_folder=self.test_image_folder_input.text().strip(),
-            test_csv_file=self.test_csv_input.text().strip(),
-        )
+
+        self.run_button.setText("Analyzing...")
+        self.run_button.setEnabled(False)
+        self.run_button.repaint()
+
+        QApplication.processEvents()
 
         try:
-            result = parser.parse()
-        except Exception as error:
-            self._show_summary_text(
-                f"Analysis could not start.\n\n{error}"
-            )
-            return
 
-        summary_lines = [
-            "Dataset Summary",
-            "",
-            "TRAIN",
-            f"Rows: {result['train']['num_rows']}",
-            f"Columns: {', '.join(result['train']['columns'])}",
-            f"Image folder: {result['train']['image_folder']}",
-            f"CSV file: {result['train']['csv_file']}",
-            "",
-            "Detected Columns",
-            f"Image: {result['train']['detected_columns']['image'] or 'Not detected'}",
-            f"Label: {result['train']['detected_columns']['label'] or 'Not detected'}",
-            f"Valence: {result['train']['detected_columns']['valence'] or 'Not detected'}",
-            f"Arousal: {result['train']['detected_columns']['arousal'] or 'Not detected'}",
-            "",
-            "Image Consistency",
-            f"Images in folder: {result['train']['image_check']['folder_image_count']}",
-            f"Images referenced in CSV: {result['train']['image_check']['csv_image_count']}",
-            f"Missing images: {len(result['train']['image_check']['missing_images'])}",
-            f"Unused images: {len(result['train']['image_check']['unused_images'])}",
-            f"Status: {result['train']['image_check']['status']}",
-
-            "",
-            "Dataset Statistics",
-            f"Number of classes: {result['train']['statistics']['num_classes']}",
-            "",
-            "Class Distribution",
-
-        ]
-        
-        for label, count in (
-            result["train"]["statistics"]["class_distribution"].items()
-        ):
-            summary_lines.append(f"{label}: {count}")
-
-        if result["test"] is not None:
-            summary_lines.extend(
-                [
-                    "",
-                    "TEST",
-                    f"Rows: {result['test']['num_rows']}",
-                    f"Columns: {', '.join(result['test']['columns'])}",
-                    f"Image folder: {result['test']['image_folder']}",
-                    f"CSV file: {result['test']['csv_file']}",
-                ]
-            )
-        else:
-            summary_lines.extend(
-                [
-                    "",
-                    "TEST",
-                    "No test dataset selected.",
-                ]
+            parser = DatasetParser(
+                train_image_folder=self.train_image_folder_input.text().strip(),
+                train_csv_file=self.train_csv_input.text().strip(),
+                test_image_folder=self.test_image_folder_input.text().strip(),
+                test_csv_file=self.test_csv_input.text().strip(),
             )
 
-        self._show_summary_text("\n".join(summary_lines))
+            try:
+                result = parser.parse()
+            except Exception as error:
+                self._show_summary_text(
+                    f"Analysis could not start.\n\n{error}"
+                )
+                return
+
+            summary_lines = [
+                "Dataset Summary",
+                "",
+                "TRAIN",
+                f"Rows: {result['train']['num_rows']}",
+                f"Columns: {', '.join(result['train']['columns'])}",
+                f"Image folder: {result['train']['image_folder']}",
+                f"CSV file: {result['train']['csv_file']}",
+                "",
+                "Detected Columns",
+                f"Image: {result['train']['detected_columns']['image'] or 'Not detected'}",
+                f"Label: {result['train']['detected_columns']['label'] or 'Not detected'}",
+                f"Valence: {result['train']['detected_columns']['valence'] or 'Not detected'}",
+                f"Arousal: {result['train']['detected_columns']['arousal'] or 'Not detected'}",
+                "",
+                "Image Consistency",
+                f"Images in folder: {result['train']['image_check']['folder_image_count']}",
+                f"Images referenced in CSV: {result['train']['image_check']['csv_image_count']}",
+                f"Missing images: {len(result['train']['image_check']['missing_images'])}",
+                f"Unused images: {len(result['train']['image_check']['unused_images'])}",
+                f"Status: {result['train']['image_check']['status']}",
+
+                "",
+                "Dataset Statistics",
+                f"Number of classes: {result['train']['statistics']['num_classes']}",
+                "",
+                "Class Distribution",
+
+            ]
+            
+            for label, count in (
+                result["train"]["statistics"]["class_distribution"].items()
+            ):
+                summary_lines.append(f"{label}: {count}")
+
+            if result["test"] is not None:
+                summary_lines.extend(
+                    [
+                        "",
+                        "TEST",
+                        f"Rows: {result['test']['num_rows']}",
+                        f"Columns: {', '.join(result['test']['columns'])}",
+                        f"Image folder: {result['test']['image_folder']}",
+                        f"CSV file: {result['test']['csv_file']}",
+                    ]
+                )
+            else:
+                summary_lines.extend(
+                    [
+                        "",
+                        "TEST",
+                        "No test dataset selected.",
+                    ]
+                )
+
+            self._show_summary_text("\n".join(summary_lines))
+
+            duplicate_result = result["train"]["duplicates"]
+
+            self._show_duplicate_groups(duplicate_result)
+
+        finally:
+
+            self.run_button.setEnabled(True)
+            self.run_button.setText("Run Analysis")
 
     def _show_summary_text(self, text):
         layout = self.summary_tab.layout()
@@ -389,3 +412,117 @@ class MainWindow(QMainWindow):
         layout.addWidget(summary_text)
 
         self.result_tabs.setCurrentWidget(self.summary_tab)
+
+    def _show_duplicate_groups(self, duplicate_result):
+        layout = self.duplicates_tab.layout()
+
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+
+            if widget is not None:
+                widget.deleteLater()
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setSpacing(18)
+
+        summary_label = QLabel(
+            "Duplicate Detection\n\n"
+            f"Images analyzed: {duplicate_result['image_count']}\n"
+            f"Threshold: {duplicate_result['threshold']}\n"
+            f"Duplicate groups: "
+            f"{duplicate_result['duplicate_group_count']}\n"
+            f"Duplicate pairs: "
+            f"{duplicate_result['duplicate_pair_count']}"
+        )
+        summary_label.setStyleSheet(
+            "font-size: 14px; padding: 8px;"
+        )
+
+        container_layout.addWidget(summary_label)
+
+        for group_index, group in enumerate(
+            duplicate_result["duplicate_groups"],
+            start=1,
+        ):
+            group_frame = QFrame()
+            group_frame.setFrameShape(QFrame.Shape.StyledPanel)
+
+            group_layout = QVBoxLayout(group_frame)
+            group_layout.setSpacing(10)
+
+            group_title = QLabel(
+                f"Group {group_index} ({len(group)} images)"
+            )
+            group_title.setStyleSheet(
+                "font-size: 15px; font-weight: 600;"
+            )
+
+            thumbnail_grid = QGridLayout()
+            thumbnail_grid.setSpacing(14)
+
+            for image_index, image_path in enumerate(group):
+                image_widget = QWidget()
+                image_layout = QVBoxLayout(image_widget)
+                image_layout.setContentsMargins(0, 0, 0, 0)
+
+                thumbnail_label = QLabel()
+                thumbnail_label.setFixedSize(150, 150)
+                thumbnail_label.setAlignment(
+                    Qt.AlignmentFlag.AlignCenter
+                )
+                thumbnail_label.setStyleSheet(
+                    "border: 1px solid #999999;"
+                )
+
+                pixmap = QPixmap(str(image_path))
+
+                if not pixmap.isNull():
+                    scaled_pixmap = pixmap.scaled(
+                        140,
+                        140,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
+                    thumbnail_label.setPixmap(scaled_pixmap)
+                else:
+                    thumbnail_label.setText(
+                        "Image could not be loaded"
+                    )
+
+                filename_label = QLabel(image_path.name)
+                filename_label.setAlignment(
+                    Qt.AlignmentFlag.AlignCenter
+                )
+                filename_label.setWordWrap(True)
+                filename_label.setMaximumWidth(150)
+
+                image_layout.addWidget(thumbnail_label)
+                image_layout.addWidget(filename_label)
+
+                row = image_index // 4
+                column = image_index % 4
+
+                thumbnail_grid.addWidget(
+                    image_widget,
+                    row,
+                    column,
+                )
+
+            group_layout.addWidget(group_title)
+            group_layout.addLayout(thumbnail_grid)
+
+            container_layout.addWidget(group_frame)
+
+        container_layout.addStretch()
+
+        scroll_area.setWidget(container)
+        layout.addWidget(scroll_area)
+
+        self.result_tabs.setCurrentWidget(
+            self.duplicates_tab
+        )
