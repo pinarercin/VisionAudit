@@ -1,3 +1,5 @@
+import csv
+from pathlib import Path
 from parsers.dataset_parser import DatasetParser
 from PIL import Image
 from PySide6.QtCore import Qt
@@ -12,6 +14,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QPlainTextEdit,
     QPushButton,
+    QSpinBox,
     QSizePolicy,
     QTabWidget,
     QVBoxLayout,
@@ -117,6 +120,11 @@ class MainWindow(QMainWindow):
         self.duplicate_checkbox = QCheckBox("Duplicate Detection")
         self.duplicate_checkbox.setChecked(True)
 
+        self.phash_threshold_input = QSpinBox()
+        self.phash_threshold_input.setRange(0, 20)
+        self.phash_threshold_input.setValue(5)
+        self.phash_threshold_input.setPrefix("pHash Threshold: ")
+
         self.leakage_checkbox = QCheckBox("Train-Test Leakage")
         self.leakage_checkbox.setChecked(True)
         self.leakage_checkbox.setEnabled(False)
@@ -155,6 +163,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(analyses_heading)
         layout.addWidget(self.summary_checkbox)
         layout.addWidget(self.duplicate_checkbox)
+        layout.addWidget(self.phash_threshold_input)
         layout.addWidget(self.leakage_checkbox)
         layout.addWidget(self.run_button)
 
@@ -241,6 +250,10 @@ class MainWindow(QMainWindow):
 
         self.run_button.clicked.connect(self._run_analysis)
 
+        self.export_csv_button.clicked.connect(
+            self._export_csv_results
+        )
+
     def _select_train_image_folder(self):
         folder_path = QFileDialog.getExistingDirectory(
             self,
@@ -316,6 +329,7 @@ class MainWindow(QMainWindow):
                 train_csv_file=self.train_csv_input.text().strip(),
                 test_image_folder=self.test_image_folder_input.text().strip(),
                 test_csv_file=self.test_csv_input.text().strip(),
+                phash_threshold=self.phash_threshold_input.value(),
             )
 
             try:
@@ -383,9 +397,16 @@ class MainWindow(QMainWindow):
 
             self._show_summary_text("\n".join(summary_lines))
 
+            self.train_dataframe = result["train"]["dataframe"]
+            self.train_image_column = result["train"][
+                "detected_columns"
+            ]["image"]
+
             duplicate_result = result["train"]["duplicates"]
 
             self._show_duplicate_groups(duplicate_result)
+
+            self.export_csv_button.setEnabled(True)
 
         finally:
 
@@ -413,8 +434,81 @@ class MainWindow(QMainWindow):
 
         self.result_tabs.setCurrentWidget(self.summary_tab)
 
+    def _export_csv_results(self):
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Duplicate Results",
+            "duplicate_results.csv",
+            "CSV Files (*.csv)",
+        )
+
+        if not file_path:
+            return
+
+        original_columns = list(self.train_dataframe.columns)
+
+        with open(
+            file_path,
+            "w",
+            newline="",
+            encoding="utf-8",
+        ) as csv_file:
+            writer = csv.writer(csv_file)
+
+            writer.writerow(
+                [
+                    "group_id",
+                    "image_name",
+                    *original_columns,
+                ]
+            )
+
+            for group_id, review in (
+                self.duplicate_review_state.items()
+            ):
+                if not review["checkbox"].isChecked():
+                    continue
+
+                for image_path in review["group"]:
+                    image_stem = image_path.stem
+
+                    matched_rows = self.train_dataframe[
+                        self.train_dataframe[
+                            self.train_image_column
+                        ]
+                        .astype(str)
+                        .apply(
+                            lambda value: Path(value).stem
+                        )
+                        == image_stem
+                    ]
+
+                    if matched_rows.empty:
+                        writer.writerow(
+                            [
+                                group_id,
+                                image_path.name,
+                                *([""] * len(original_columns)),
+                            ]
+                        )
+                        continue
+
+                    row = matched_rows.iloc[0]
+
+                    writer.writerow(
+                        [
+                            group_id,
+                            image_path.name,
+                            *[
+                                row[column]
+                                for column in original_columns
+                            ],
+                        ]
+                    )
+
     def _show_duplicate_groups(self, duplicate_result):
         layout = self.duplicates_tab.layout()
+        self.duplicate_review_state = {}
 
         while layout.count():
             item = layout.takeAt(0)
@@ -461,6 +555,16 @@ class MainWindow(QMainWindow):
             group_title.setStyleSheet(
                 "font-size: 15px; font-weight: 600;"
             )
+
+            duplicate_checkbox = QCheckBox(
+                "Include as duplicate"
+            )
+            duplicate_checkbox.setChecked(True)
+
+            self.duplicate_review_state[group_index] = {
+                "group": group,
+                "checkbox": duplicate_checkbox,
+            }
 
             thumbnail_grid = QGridLayout()
             thumbnail_grid.setSpacing(14)
@@ -514,6 +618,7 @@ class MainWindow(QMainWindow):
                 )
 
             group_layout.addWidget(group_title)
+            group_layout.addWidget(duplicate_checkbox)
             group_layout.addLayout(thumbnail_grid)
 
             container_layout.addWidget(group_frame)

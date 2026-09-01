@@ -57,9 +57,11 @@ class DatasetParser:
         train_csv_file: str,
         test_image_folder: str = "",
         test_csv_file: str = "",
+        phash_threshold: int = 5,
     ):
         self.train_image_folder = Path(train_image_folder)
         self.train_csv_file = Path(train_csv_file)
+        self.phash_threshold = phash_threshold
 
         self.test_image_folder = (
             Path(test_image_folder) if test_image_folder else None
@@ -90,6 +92,7 @@ class DatasetParser:
         train_duplicate_analysis = (
             PHashDuplicateAnalyzer().analyze(
                 image_folder=self.train_image_folder,
+                threshold=self.phash_threshold,
             )
         )
 
@@ -103,6 +106,7 @@ class DatasetParser:
                 "statistics": train_statistics,
                 "image_check": train_image_check,
                 "duplicates": train_duplicate_analysis,
+                "dataframe": train_df,
             },
             "test": None,
         }
