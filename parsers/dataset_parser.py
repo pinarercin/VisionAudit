@@ -6,6 +6,8 @@ from analysis.phash_duplicate_analyzer import (
     PHashDuplicateAnalyzer,
 )
 
+from analysis.phash_leakage_analyzer import PHashLeakageAnalyzer
+
 class DatasetParser:
 
     SUPPORTED_IMAGE_EXTENSIONS = {
@@ -109,6 +111,7 @@ class DatasetParser:
                 "dataframe": train_df,
             },
             "test": None,
+            "leakage": None,
         }
 
         if self.test_image_folder and self.test_csv_file:
@@ -134,6 +137,12 @@ class DatasetParser:
                 )
             )
 
+            leakage_analysis = PHashLeakageAnalyzer().analyze(
+                train_image_folder=self.train_image_folder,
+                test_image_folder=self.test_image_folder,
+                threshold=self.phash_threshold,
+            )
+
             result["test"] = {
                 "num_rows": len(test_df),
                 "columns": list(test_df.columns),
@@ -145,6 +154,8 @@ class DatasetParser:
                 "duplicates": test_duplicate_analysis,
                 "dataframe": test_df,
             }
+
+            result["leakage"] = leakage_analysis
 
         return result
 

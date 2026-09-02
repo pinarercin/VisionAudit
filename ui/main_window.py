@@ -1,4 +1,5 @@
 import csv
+import pandas as pd
 from pathlib import Path
 from parsers.dataset_parser import DatasetParser
 from PIL import Image
@@ -166,9 +167,14 @@ class MainWindow(QMainWindow):
             "Export Test Duplicates CSV"
         )
 
+        self.export_leakage_csv_button = QPushButton(
+            "Export Leakage CSV"
+        )
+
         self.export_html_button.setEnabled(False)
         self.export_train_csv_button.setEnabled(False)
         self.export_test_csv_button.setEnabled(False)
+        self.export_leakage_csv_button.setEnabled(False)
 
         layout.addWidget(title)
         layout.addWidget(subtitle)
@@ -197,6 +203,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.export_html_button)
         layout.addWidget(self.export_train_csv_button)
         layout.addWidget(self.export_test_csv_button)
+        layout.addWidget(self.export_leakage_csv_button)
 
         layout.addStretch()
 
@@ -283,6 +290,10 @@ class MainWindow(QMainWindow):
 
         self.export_test_csv_button.clicked.connect(
             self._export_test_csv_results
+        )
+
+        self.export_leakage_csv_button.clicked.connect(
+            self._export_leakage_csv_results
         )
 
     def _select_train_image_folder(self):
@@ -467,11 +478,21 @@ class MainWindow(QMainWindow):
                 test_duplicate_result,
             )
 
+            if result["leakage"] is not None:
+                self._show_leakage_groups(
+                    result["leakage"]
+                )
+
             self.export_train_csv_button.setEnabled(True)
 
             self.export_test_csv_button.setEnabled(
                 result["test"] is not None
             )
+    
+            self.export_leakage_csv_button.setEnabled(
+                result["leakage"] is not None
+            )
+
         finally:
 
             self.run_button.setEnabled(True)
@@ -497,6 +518,15 @@ class MainWindow(QMainWindow):
         layout.addWidget(summary_text)
 
         self.result_tabs.setCurrentWidget(self.summary_tab)
+
+    def _format_csv_value(self, value):
+        if pd.isna(value):
+            return ""
+
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+
+        return value
 
     def _export_train_csv_results(self):
         file_path, _ = QFileDialog.getSaveFileName(
@@ -564,7 +594,7 @@ class MainWindow(QMainWindow):
                             group_id,
                             image_path.name,
                             *[
-                                row[column]
+                                self._format_csv_value(row[column])
                                 for column in original_columns
                             ],
                         ]
@@ -636,11 +666,125 @@ class MainWindow(QMainWindow):
                             group_id,
                             image_path.name,
                             *[
-                                row[column]
+                                self._format_csv_value(row[column])
                                 for column in original_columns
                             ],
                         ]
                     )
+
+    def _export_leakage_csv_results(self):
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Leakage Results",
+            "leakage_results.csv",
+            "CSV Files (*.csv)",
+        )
+
+        if not file_path:
+            return
+
+        train_columns = list(self.train_dataframe.columns)
+        test_columns = list(self.test_dataframe.columns)
+
+        with open(
+            file_path,
+            "w",
+            newline="",
+            encoding="utf-8",
+        ) as csv_file:
+            writer = csv.writer(csv_file)
+
+            writer.writerow(
+                [
+                    "group_id",
+                    "train_image_name",
+                    "test_image_name",
+                    *[
+                        f"train_{column}"
+                        for column in train_columns
+                    ],
+                    *[
+                        f"test_{column}"
+                        for column in test_columns
+                    ],
+                ]
+            )
+
+            for group_id, review in (
+                self.leakage_review_state.items()
+            ):
+                if not review["checkbox"].isChecked():
+                    continue
+
+                group = review["group"]
+
+                for train_image_path in group["train"]:
+                    train_stem = train_image_path.stem
+
+                    train_matches = self.train_dataframe[
+                        self.train_dataframe[
+                            self.train_image_column
+                        ]
+                        .astype(str)
+                        .apply(
+                            lambda value: Path(value).stem
+                        )
+                        == train_stem
+                    ]
+
+                    train_values = (
+                        train_matches.iloc[0]
+                        if not train_matches.empty
+                        else None
+                    )
+
+                    for test_image_path in group["test"]:
+                        test_stem = test_image_path.stem
+
+                        test_matches = self.test_dataframe[
+                            self.test_dataframe[
+                                self.test_image_column
+                            ]
+                            .astype(str)
+                            .apply(
+                                lambda value: Path(value).stem
+                            )
+                            == test_stem
+                        ]
+
+                        test_values = (
+                            test_matches.iloc[0]
+                            if not test_matches.empty
+                            else None
+                        )
+
+                        writer.writerow(
+                            [
+                                group_id,
+                                train_image_path.name,
+                                test_image_path.name,
+                                *[
+                                    (
+                                        self._format_csv_value(
+                                            train_values[column]
+                                        )
+                                        if train_values is not None
+                                        else ""
+                                    )
+                                    for column in train_columns
+                                ],
+                                *[
+                                    (
+                                        self._format_csv_value(
+                                            test_values[column]
+                                        )
+                                        if test_values is not None
+                                        else ""
+                                    )
+                                    for column in test_columns
+                                ],
+                            ]
+                        )
 
     def _add_duplicate_group_widgets(
         self,
@@ -824,3 +968,157 @@ class MainWindow(QMainWindow):
         self.result_tabs.setCurrentWidget(
             self.duplicates_tab
         )
+
+    def _show_leakage_groups(self, leakage_result):
+        layout = self.leakage_tab.layout()
+
+        self.leakage_review_state = {}
+
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+
+            if widget is not None:
+                widget.deleteLater()
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setSpacing(18)
+
+        summary_label = QLabel(
+            "TRAIN ↔ TEST LEAKAGE\n\n"
+            f"Train images analyzed: "
+            f"{leakage_result['train_image_count']}\n"
+            f"Test images analyzed: "
+            f"{leakage_result['test_image_count']}\n"
+            f"Threshold: "
+            f"{leakage_result['threshold']}\n"
+            f"Leakage groups: "
+            f"{leakage_result['leakage_group_count']}\n"
+            f"Leakage pairs: "
+            f"{leakage_result['leakage_pair_count']}"
+        )
+        summary_label.setStyleSheet(
+            "font-size: 14px; padding: 8px;"
+        )
+
+        container_layout.addWidget(summary_label)
+
+        for group_index, group in enumerate(
+            leakage_result["leakage_groups"],
+            start=1,
+        ):
+            group_frame = QFrame()
+            group_frame.setFrameShape(
+                QFrame.Shape.StyledPanel
+            )
+
+            group_layout = QVBoxLayout(group_frame)
+            group_layout.setSpacing(10)
+
+            group_title = QLabel(
+                f"Leakage Group {group_index}"
+            )
+            group_title.setStyleSheet(
+                "font-size: 15px; font-weight: 600;"
+            )
+
+            leakage_checkbox = QCheckBox(
+                "Include as leakage"
+            )
+            leakage_checkbox.setChecked(True)
+
+            self.leakage_review_state[group_index] = {
+                "group": group,
+                "checkbox": leakage_checkbox,
+            }
+
+            group_layout.addWidget(group_title)
+            group_layout.addWidget(leakage_checkbox)
+
+            for dataset_name in ("train", "test"):
+                dataset_label = QLabel(
+                    dataset_name.upper()
+                )
+                dataset_label.setStyleSheet(
+                    "font-weight: 600;"
+                )
+                group_layout.addWidget(dataset_label)
+
+                thumbnail_grid = QGridLayout()
+                thumbnail_grid.setSpacing(14)
+
+                for image_index, image_path in enumerate(
+                    group[dataset_name]
+                ):
+                    image_widget = QWidget()
+                    image_layout = QVBoxLayout(image_widget)
+                    image_layout.setContentsMargins(
+                        0,
+                        0,
+                        0,
+                        0,
+                    )
+
+                    thumbnail_label = QLabel()
+                    thumbnail_label.setFixedSize(150, 150)
+                    thumbnail_label.setAlignment(
+                        Qt.AlignmentFlag.AlignCenter
+                    )
+                    thumbnail_label.setStyleSheet(
+                        "border: 1px solid #999999;"
+                    )
+
+                    pixmap = QPixmap(str(image_path))
+
+                    if not pixmap.isNull():
+                        scaled_pixmap = pixmap.scaled(
+                            140,
+                            140,
+                            Qt.AspectRatioMode.KeepAspectRatio,
+                            Qt.TransformationMode.SmoothTransformation,
+                        )
+                        thumbnail_label.setPixmap(
+                            scaled_pixmap
+                        )
+                    else:
+                        thumbnail_label.setText(
+                            "Image could not be loaded"
+                        )
+
+                    filename_label = QLabel(
+                        image_path.name
+                    )
+                    filename_label.setAlignment(
+                        Qt.AlignmentFlag.AlignCenter
+                    )
+                    filename_label.setWordWrap(True)
+                    filename_label.setMaximumWidth(150)
+
+                    image_layout.addWidget(
+                        thumbnail_label
+                    )
+                    image_layout.addWidget(
+                        filename_label
+                    )
+
+                    row = image_index // 4
+                    column = image_index % 4
+
+                    thumbnail_grid.addWidget(
+                        image_widget,
+                        row,
+                        column,
+                    )
+
+                group_layout.addLayout(thumbnail_grid)
+
+            container_layout.addWidget(group_frame)
+
+        container_layout.addStretch()
+
+        scroll_area.setWidget(container)
+        layout.addWidget(scroll_area)
