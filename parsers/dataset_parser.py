@@ -127,6 +127,13 @@ class DatasetParser:
                 image_column=test_detected_columns["image"],
             )
 
+            test_duplicate_analysis = (
+                PHashDuplicateAnalyzer().analyze(
+                    image_folder=self.test_image_folder,
+                    threshold=self.phash_threshold,
+                )
+            )
+
             result["test"] = {
                 "num_rows": len(test_df),
                 "columns": list(test_df.columns),
@@ -135,6 +142,8 @@ class DatasetParser:
                 "detected_columns": test_detected_columns,
                 "statistics": test_statistics,
                 "image_check": test_image_check,
+                "duplicates": test_duplicate_analysis,
+                "dataframe": test_df,
             }
 
         return result

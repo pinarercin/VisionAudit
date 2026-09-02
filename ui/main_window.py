@@ -2,7 +2,7 @@ import csv
 from pathlib import Path
 from parsers.dataset_parser import DatasetParser
 from PIL import Image
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -33,8 +33,28 @@ class MainWindow(QMainWindow):
         self.resize(1200, 780)
         self.setMinimumSize(1000, 700)
 
+        self.settings = QSettings(
+            "VisionAudit",
+            "VisionAudit",
+        )
+
         self._build_ui()
+        self._load_saved_paths()
         self._connect_signals()
+
+    def _load_saved_paths(self):
+        self.train_image_folder_input.setText(
+            self.settings.value("train_image_folder", "")
+        )
+        self.train_csv_input.setText(
+            self.settings.value("train_csv_file", "")
+        )
+        self.test_image_folder_input.setText(
+            self.settings.value("test_image_folder", "")
+        )
+        self.test_csv_input.setText(
+            self.settings.value("test_csv_file", "")
+        )
 
     def _build_ui(self):
         central_widget = QWidget()
@@ -139,10 +159,16 @@ class MainWindow(QMainWindow):
         )
 
         self.export_html_button = QPushButton("Export HTML Report")
-        self.export_csv_button = QPushButton("Export CSV Results")
+        self.export_train_csv_button = QPushButton(
+            "Export Train Duplicates CSV"
+        )
+        self.export_test_csv_button = QPushButton(
+            "Export Test Duplicates CSV"
+        )
 
         self.export_html_button.setEnabled(False)
-        self.export_csv_button.setEnabled(False)
+        self.export_train_csv_button.setEnabled(False)
+        self.export_test_csv_button.setEnabled(False)
 
         layout.addWidget(title)
         layout.addWidget(subtitle)
@@ -169,7 +195,8 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(export_heading)
         layout.addWidget(self.export_html_button)
-        layout.addWidget(self.export_csv_button)
+        layout.addWidget(self.export_train_csv_button)
+        layout.addWidget(self.export_test_csv_button)
 
         layout.addStretch()
 
@@ -250,8 +277,12 @@ class MainWindow(QMainWindow):
 
         self.run_button.clicked.connect(self._run_analysis)
 
-        self.export_csv_button.clicked.connect(
-            self._export_csv_results
+        self.export_train_csv_button.clicked.connect(
+            self._export_train_csv_results
+        )
+
+        self.export_test_csv_button.clicked.connect(
+            self._export_test_csv_results
         )
 
     def _select_train_image_folder(self):
@@ -262,6 +293,10 @@ class MainWindow(QMainWindow):
 
         if folder_path:
             self.train_image_folder_input.setText(folder_path)
+            self.settings.setValue(
+                "train_image_folder",
+                folder_path,
+            )
 
     def _select_train_csv_file(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -273,6 +308,10 @@ class MainWindow(QMainWindow):
 
         if file_path:
             self.train_csv_input.setText(file_path)
+            self.settings.setValue(
+                "train_csv_file",
+                file_path,
+            )
 
     def _select_test_image_folder(self):
         folder_path = QFileDialog.getExistingDirectory(
@@ -282,6 +321,10 @@ class MainWindow(QMainWindow):
 
         if folder_path:
             self.test_image_folder_input.setText(folder_path)
+            self.settings.setValue(
+                "test_image_folder",
+                folder_path,
+            )
 
     def _select_test_csv_file(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -293,6 +336,10 @@ class MainWindow(QMainWindow):
 
         if file_path:
             self.test_csv_input.setText(file_path)
+            self.settings.setValue(
+                "test_csv_file",
+                file_path,
+            )
 
     def _update_leakage_availability(self):
         test_folder_selected = bool(
@@ -402,12 +449,29 @@ class MainWindow(QMainWindow):
                 "detected_columns"
             ]["image"]
 
-            duplicate_result = result["train"]["duplicates"]
+            if result["test"] is not None:
+                self.test_dataframe = result["test"]["dataframe"]
+                self.test_image_column = result["test"][
+                    "detected_columns"
+                ]["image"]
 
-            self._show_duplicate_groups(duplicate_result)
+            train_duplicate_result = result["train"]["duplicates"]
 
-            self.export_csv_button.setEnabled(True)
+            test_duplicate_result = None
 
+            if result["test"] is not None:
+                test_duplicate_result = result["test"]["duplicates"]
+
+            self._show_duplicate_groups(
+                train_duplicate_result,
+                test_duplicate_result,
+            )
+
+            self.export_train_csv_button.setEnabled(True)
+
+            self.export_test_csv_button.setEnabled(
+                result["test"] is not None
+            )
         finally:
 
             self.run_button.setEnabled(True)
@@ -434,7 +498,7 @@ class MainWindow(QMainWindow):
 
         self.result_tabs.setCurrentWidget(self.summary_tab)
 
-    def _export_csv_results(self):
+    def _export_train_csv_results(self):
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export Duplicate Results",
@@ -464,7 +528,7 @@ class MainWindow(QMainWindow):
             )
 
             for group_id, review in (
-                self.duplicate_review_state.items()
+                self.duplicate_review_state["train"].items()
             ):
                 if not review["checkbox"].isChecked():
                     continue
@@ -506,45 +570,92 @@ class MainWindow(QMainWindow):
                         ]
                     )
 
-    def _show_duplicate_groups(self, duplicate_result):
-        layout = self.duplicates_tab.layout()
-        self.duplicate_review_state = {}
-
-        while layout.count():
-            item = layout.takeAt(0)
-            widget = item.widget()
-
-            if widget is not None:
-                widget.deleteLater()
-
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-
-        container = QWidget()
-        container_layout = QVBoxLayout(container)
-        container_layout.setSpacing(18)
-
-        summary_label = QLabel(
-            "Duplicate Detection\n\n"
-            f"Images analyzed: {duplicate_result['image_count']}\n"
-            f"Threshold: {duplicate_result['threshold']}\n"
-            f"Duplicate groups: "
-            f"{duplicate_result['duplicate_group_count']}\n"
-            f"Duplicate pairs: "
-            f"{duplicate_result['duplicate_pair_count']}"
-        )
-        summary_label.setStyleSheet(
-            "font-size: 14px; padding: 8px;"
+    def _export_test_csv_results(self):
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Test Duplicate Results",
+            "test_duplicate_results.csv",
+            "CSV Files (*.csv)",
         )
 
-        container_layout.addWidget(summary_label)
+        if not file_path:
+            return
 
+        original_columns = list(self.test_dataframe.columns)
+
+        with open(
+            file_path,
+            "w",
+            newline="",
+            encoding="utf-8",
+        ) as csv_file:
+            writer = csv.writer(csv_file)
+
+            writer.writerow(
+                [
+                    "group_id",
+                    "image_name",
+                    *original_columns,
+                ]
+            )
+
+            for group_id, review in (
+                self.duplicate_review_state["test"].items()
+            ):
+                if not review["checkbox"].isChecked():
+                    continue
+
+                for image_path in review["group"]:
+                    image_stem = image_path.stem
+
+                    matched_rows = self.test_dataframe[
+                        self.test_dataframe[
+                            self.test_image_column
+                        ]
+                        .astype(str)
+                        .apply(
+                            lambda value: Path(value).stem
+                        )
+                        == image_stem
+                    ]
+
+                    if matched_rows.empty:
+                        writer.writerow(
+                            [
+                                group_id,
+                                image_path.name,
+                                *([""] * len(original_columns)),
+                            ]
+                        )
+                        continue
+
+                    row = matched_rows.iloc[0]
+
+                    writer.writerow(
+                        [
+                            group_id,
+                            image_path.name,
+                            *[
+                                row[column]
+                                for column in original_columns
+                            ],
+                        ]
+                    )
+
+    def _add_duplicate_group_widgets(
+        self,
+        container_layout,
+        duplicate_result,
+        dataset_name,
+    ):
         for group_index, group in enumerate(
             duplicate_result["duplicate_groups"],
             start=1,
         ):
             group_frame = QFrame()
-            group_frame.setFrameShape(QFrame.Shape.StyledPanel)
+            group_frame.setFrameShape(
+                QFrame.Shape.StyledPanel
+            )
 
             group_layout = QVBoxLayout(group_frame)
             group_layout.setSpacing(10)
@@ -561,7 +672,9 @@ class MainWindow(QMainWindow):
             )
             duplicate_checkbox.setChecked(True)
 
-            self.duplicate_review_state[group_index] = {
+            self.duplicate_review_state[dataset_name][
+                group_index
+            ] = {
                 "group": group,
                 "checkbox": duplicate_checkbox,
             }
@@ -572,7 +685,12 @@ class MainWindow(QMainWindow):
             for image_index, image_path in enumerate(group):
                 image_widget = QWidget()
                 image_layout = QVBoxLayout(image_widget)
-                image_layout.setContentsMargins(0, 0, 0, 0)
+                image_layout.setContentsMargins(
+                    0,
+                    0,
+                    0,
+                    0,
+                )
 
                 thumbnail_label = QLabel()
                 thumbnail_label.setFixedSize(150, 150)
@@ -592,7 +710,9 @@ class MainWindow(QMainWindow):
                         Qt.AspectRatioMode.KeepAspectRatio,
                         Qt.TransformationMode.SmoothTransformation,
                     )
-                    thumbnail_label.setPixmap(scaled_pixmap)
+                    thumbnail_label.setPixmap(
+                        scaled_pixmap
+                    )
                 else:
                     thumbnail_label.setText(
                         "Image could not be loaded"
@@ -622,6 +742,79 @@ class MainWindow(QMainWindow):
             group_layout.addLayout(thumbnail_grid)
 
             container_layout.addWidget(group_frame)
+
+    def _show_duplicate_groups(
+        self,
+        train_duplicate_result,
+        test_duplicate_result=None,
+    ):
+        layout = self.duplicates_tab.layout()
+
+        self.duplicate_review_state = {
+            "train": {},
+            "test": {},
+        }
+
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+
+            if widget is not None:
+                widget.deleteLater()
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setSpacing(18)
+
+        summary_label = QLabel(
+            "TRAIN DUPLICATES\n\n"
+            f"Images analyzed: "
+            f"{train_duplicate_result['image_count']}\n"
+            f"Threshold: "
+            f"{train_duplicate_result['threshold']}\n"
+            f"Duplicate groups: "
+            f"{train_duplicate_result['duplicate_group_count']}\n"
+            f"Duplicate pairs: "
+            f"{train_duplicate_result['duplicate_pair_count']}"
+        )
+        summary_label.setStyleSheet(
+            "font-size: 14px; padding: 8px;"
+        )
+
+        container_layout.addWidget(summary_label)
+
+        self._add_duplicate_group_widgets(
+            container_layout=container_layout,
+            duplicate_result=train_duplicate_result,
+            dataset_name="train",
+        )
+
+        if test_duplicate_result is not None:
+            test_summary_label = QLabel(
+                "TEST DUPLICATES\n\n"
+                f"Images analyzed: "
+                f"{test_duplicate_result['image_count']}\n"
+                f"Threshold: "
+                f"{test_duplicate_result['threshold']}\n"
+                f"Duplicate groups: "
+                f"{test_duplicate_result['duplicate_group_count']}\n"
+                f"Duplicate pairs: "
+                f"{test_duplicate_result['duplicate_pair_count']}"
+            )
+            test_summary_label.setStyleSheet(
+                "font-size: 14px; padding: 8px; margin-top: 20px;"
+            )
+
+            container_layout.addWidget(test_summary_label)
+
+            self._add_duplicate_group_widgets(
+                container_layout=container_layout,
+                duplicate_result=test_duplicate_result,
+                dataset_name="test",
+            )
 
         container_layout.addStretch()
 
