@@ -311,6 +311,8 @@ class DatasetParser:
             return {
                 "num_classes": 0,
                 "class_distribution": {},
+                "imbalance_ratio": None,
+                "imbalance_status": "Label column not detected",
                 "status": "Label column not detected",
             }
 
@@ -325,8 +327,30 @@ class DatasetParser:
             for label, count in label_counts.items()
         }
 
+        if len(label_counts) > 1:
+            max_count = int(label_counts.max())
+            min_count = int(label_counts.min())
+
+            imbalance_ratio = (
+                max_count / min_count
+                if min_count > 0
+                else None
+            )
+
+            imbalance_status = (
+                "Warning"
+                if imbalance_ratio is not None
+                and imbalance_ratio >= 3.0
+                else "OK"
+            )
+        else:
+            imbalance_ratio = None
+            imbalance_status = "Not applicable"
+
         return {
             "num_classes": len(class_distribution),
             "class_distribution": class_distribution,
+            "imbalance_ratio": imbalance_ratio,
+            "imbalance_status": imbalance_status,
             "status": "OK",
         }

@@ -4,7 +4,7 @@ from pathlib import Path
 from parsers.dataset_parser import DatasetParser
 from PIL import Image
 from PySide6.QtCore import QSettings, Qt
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QColor, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QFileDialog,
@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QSizePolicy,
     QTabWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
     QScrollArea,
@@ -25,6 +26,138 @@ from PySide6.QtWidgets import (
     QApplication,
 )
 
+class ClassDistributionChart(QWidget):
+    def __init__(
+        self,
+        distribution,
+        parent=None,
+        bar_color="#4F81BD",
+        horizontal=False,
+    ):
+        super().__init__(parent)
+
+        self.distribution = distribution
+        self.bar_color = bar_color
+        self.horizontal = horizontal
+        self.setMinimumHeight(180)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+
+        if not self.distribution:
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        labels = list(self.distribution.keys())
+        counts = list(self.distribution.values())
+
+        max_count = max(counts)
+
+        if self.horizontal:
+            left_margin = 80
+            right_margin = 70
+            top_margin = 20
+            bar_height = 45
+            bar_spacing = 25
+
+            available_width = (
+                self.width() - left_margin - right_margin
+            )
+
+            for index, (label, count) in enumerate(
+                zip(labels, counts)
+            ):
+                width = (
+                    count / max_count
+                ) * available_width
+
+                y = top_margin + index * (
+                    bar_height + bar_spacing
+                )
+
+                painter.fillRect(
+                    left_margin,
+                    int(y),
+                    int(width),
+                    bar_height,
+                    QColor(self.bar_color),
+                )
+
+                painter.drawText(
+                    0,
+                    int(y),
+                    left_margin - 10,
+                    bar_height,
+                    Qt.AlignRight | Qt.AlignVCenter,
+                    str(label),
+                )
+
+                painter.drawText(
+                    left_margin + int(width) + 10,
+                    int(y),
+                    60,
+                    bar_height,
+                    Qt.AlignLeft | Qt.AlignVCenter,
+                    str(count),
+                )
+
+            painter.end()
+            return
+
+        left_margin = 50
+        right_margin = 60
+        top_margin = 20
+        bottom_margin = 50
+
+        chart_width = self.width() - left_margin - right_margin
+        chart_height = self.height() - top_margin - bottom_margin
+
+        bar_spacing = 8
+        bar_width = (
+            chart_width - bar_spacing * (len(labels) - 1)
+        ) / len(labels)
+
+        for index, (label, count) in enumerate(
+            zip(labels, counts)
+        ):
+            bar_height = (
+                count / max_count
+            ) * chart_height
+
+            x = left_margin + index * (
+                bar_width + bar_spacing
+            )
+            y = top_margin + chart_height - bar_height
+
+            painter.fillRect(
+                int(x),
+                int(y),
+                int(bar_width),
+                int(bar_height),
+                QColor(self.bar_color),
+            )
+
+            painter.drawText(
+                int(x),
+                int(top_margin + chart_height + 8),
+                int(bar_width),
+                25,
+                Qt.AlignCenter,
+                str(label),
+            )
+
+            painter.drawText(
+                int(x),
+                int(y - 22),
+                int(bar_width),
+                20,
+                Qt.AlignCenter,
+                str(count),
+            )
+
+        painter.end()
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -226,9 +359,44 @@ class MainWindow(QMainWindow):
 
         self.result_tabs = QTabWidget()
 
-        self.summary_tab = self._create_placeholder_tab(
+        self.summary_tab = QWidget()
+
+        summary_layout = QVBoxLayout(self.summary_tab)
+
+        self.summary_scroll = QScrollArea()
+        self.summary_scroll.setWidgetResizable(True)
+
+        self.summary_scroll.setFrameShape(
+            QFrame.Shape.NoFrame
+        )
+
+        self.summary_content = QWidget()
+        self.summary_content_layout = QVBoxLayout(
+            self.summary_content
+        )
+
+        self.summary_placeholder = QLabel(
             "Dataset summary will appear here."
         )
+        self.summary_placeholder.setAlignment(
+            Qt.AlignmentFlag.AlignCenter
+        )
+        self.summary_placeholder.setStyleSheet(
+            "color: #777777; font-size: 15px;"
+        )
+
+        self.summary_content_layout.addWidget(
+            self.summary_placeholder
+        )
+
+        self.summary_scroll.setWidget(
+            self.summary_content
+        )
+
+        summary_layout.addWidget(
+            self.summary_scroll
+        )
+
         self.duplicates_tab = self._create_placeholder_tab(
             "Duplicate detection results will appear here."
         )
@@ -398,8 +566,37 @@ class MainWindow(QMainWindow):
                 )
                 return
 
+            test_image_count = (
+                result["test"]["num_rows"]
+                if result["test"] is not None
+                else 0
+            )
+
+            test_duplicate_group_count = (
+                result["test"]["duplicates"]["duplicate_group_count"]
+                if result["test"] is not None
+                else 0
+            )
+
+            leakage_group_count = (
+                result["leakage"]["leakage_group_count"]
+                if result["leakage"] is not None
+                else 0
+            )
+
             summary_lines = [
-                "Dataset Summary",
+                "Dataset Audit Overview",
+                "",
+                f"Train images: {result['train']['num_rows']}",
+                f"Test images: {test_image_count}",
+                f"Train duplicate groups: "
+                f"{result['train']['duplicates']['duplicate_group_count']}",
+                f"Test duplicate groups: {test_duplicate_group_count}",
+                f"Train-test leakage groups: {leakage_group_count}",
+                "",
+                "----------------------------------------",
+                "",
+                "Dataset Details",
                 "",
                 "TRAIN",
                 f"Rows: {result['train']['num_rows']}",
@@ -419,13 +616,21 @@ class MainWindow(QMainWindow):
                 f"Missing images: {len(result['train']['image_check']['missing_images'])}",
                 f"Unused images: {len(result['train']['image_check']['unused_images'])}",
                 f"Status: {result['train']['image_check']['status']}",
-
                 "",
                 "Dataset Statistics",
                 f"Number of classes: {result['train']['statistics']['num_classes']}",
+                f"Class imbalance ratio: "
+                f"{result['train']['statistics']['imbalance_ratio']:.2f}",
+                f"Class balance: "
+                f"{result['train']['statistics']['imbalance_status']}"
+                + (
+                    " — highly imbalanced class distribution"
+                    if result["train"]["statistics"]["imbalance_status"]
+                    == "Warning"
+                    else ""
+                ),
                 "",
                 "Class Distribution",
-
             ]
             
             for label, count in (
@@ -442,8 +647,42 @@ class MainWindow(QMainWindow):
                         f"Columns: {', '.join(result['test']['columns'])}",
                         f"Image folder: {result['test']['image_folder']}",
                         f"CSV file: {result['test']['csv_file']}",
+                        "",
+                        "Detected Columns",
+                        f"Image: {result['test']['detected_columns']['image'] or 'Not detected'}",
+                        f"Label: {result['test']['detected_columns']['label'] or 'Not detected'}",
+                        f"Valence: {result['test']['detected_columns']['valence'] or 'Not detected'}",
+                        f"Arousal: {result['test']['detected_columns']['arousal'] or 'Not detected'}",
+                        "",
+                        "Image Consistency",
+                        f"Images in folder: {result['test']['image_check']['folder_image_count']}",
+                        f"Images referenced in CSV: {result['test']['image_check']['csv_image_count']}",
+                        f"Missing images: {len(result['test']['image_check']['missing_images'])}",
+                        f"Unused images: {len(result['test']['image_check']['unused_images'])}",
+                        f"Status: {result['test']['image_check']['status']}",
+                        "",
+                        "Dataset Statistics",
+                        f"Number of classes: {result['test']['statistics']['num_classes']}",
+                        f"Class imbalance ratio: "
+                        f"{result['test']['statistics']['imbalance_ratio']:.2f}",
+                        f"Class balance: "
+                        f"{result['test']['statistics']['imbalance_status']}"
+                        + (
+                            " — highly imbalanced class distribution"
+                            if result["test"]["statistics"]["imbalance_status"]
+                            == "Warning"
+                            else ""
+                        ),
+                        "",
+                        "Class Distribution",
                     ]
                 )
+
+                for label, count in (
+                    result["test"]["statistics"]["class_distribution"].items()
+                ):
+                    summary_lines.append(f"{label}: {count}")
+
             else:
                 summary_lines.extend(
                     [
@@ -454,6 +693,77 @@ class MainWindow(QMainWindow):
                 )
 
             self._show_summary_text("\n".join(summary_lines))
+
+            train_distribution = (
+                result["train"]["statistics"]["class_distribution"]
+            )
+
+            train_chart_title = QLabel(
+                "Train Class Distribution"
+            )
+            train_chart_title.setStyleSheet(
+                "font-size: 16px; font-weight: bold;"
+            )
+
+            train_chart = ClassDistributionChart(
+                train_distribution
+            )
+
+            self.summary_content_layout.addWidget(
+                train_chart_title
+            )
+            self.summary_content_layout.addWidget(
+                train_chart
+            )
+
+            if result["test"] is not None:
+                test_distribution = (
+                    result["test"]["statistics"]["class_distribution"]
+                )
+
+                test_chart_title = QLabel(
+                    "Test Class Distribution"
+                )
+                test_chart_title.setStyleSheet(
+                    "font-size: 16px; font-weight: bold;"
+                )
+
+                test_chart = ClassDistributionChart(
+                    test_distribution
+                )
+
+                self.summary_content_layout.addWidget(
+                    test_chart_title
+                )
+                self.summary_content_layout.addWidget(
+                    test_chart
+                )
+
+            if result["test"] is not None:
+                dataset_size_title = QLabel(
+                    "Train vs Test Dataset Size"
+                )
+                dataset_size_title.setStyleSheet(
+                    "font-size: 16px; font-weight: bold;"
+                )
+
+                dataset_size_distribution = {
+                    "Train": result["train"]["num_rows"],
+                    "Test": result["test"]["num_rows"],
+                }
+
+                dataset_size_chart = ClassDistributionChart(
+                    dataset_size_distribution,
+                    bar_color="#C8A2E8",
+                    horizontal=True,
+                )
+
+                self.summary_content_layout.addWidget(
+                    dataset_size_title
+                )
+                self.summary_content_layout.addWidget(
+                    dataset_size_chart
+                )
 
             self.train_dataframe = result["train"]["dataframe"]
             self.train_image_column = result["train"][
@@ -499,7 +809,7 @@ class MainWindow(QMainWindow):
             self.run_button.setText("Run Analysis")
 
     def _show_summary_text(self, text):
-        layout = self.summary_tab.layout()
+        layout = self.summary_content_layout
 
         while layout.count():
             item = layout.takeAt(0)
@@ -514,6 +824,8 @@ class MainWindow(QMainWindow):
         summary_text.setStyleSheet(
             "font-size: 14px; padding: 12px;"
         )
+
+        summary_text.setMinimumHeight(520)
 
         layout.addWidget(summary_text)
 
