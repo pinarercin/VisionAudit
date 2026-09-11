@@ -539,6 +539,10 @@ class MainWindow(QMainWindow):
         else:
             self.leakage_checkbox.setChecked(True)
 
+    def _update_analysis_status(self, message):
+        self.run_button.setText(message)
+        self.run_button.repaint()
+        QApplication.processEvents()
     
     def _run_analysis(self):
 
@@ -556,6 +560,7 @@ class MainWindow(QMainWindow):
                 test_image_folder=self.test_image_folder_input.text().strip(),
                 test_csv_file=self.test_csv_input.text().strip(),
                 phash_threshold=self.phash_threshold_input.value(),
+                status_callback=self._update_analysis_status,
             )
 
             try:

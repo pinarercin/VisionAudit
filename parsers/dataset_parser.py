@@ -60,10 +60,12 @@ class DatasetParser:
         test_image_folder: str = "",
         test_csv_file: str = "",
         phash_threshold: int = 5,
+        status_callback=None,
     ):
         self.train_image_folder = Path(train_image_folder)
         self.train_csv_file = Path(train_csv_file)
         self.phash_threshold = phash_threshold
+        self.status_callback = status_callback
 
         self.test_image_folder = (
             Path(test_image_folder) if test_image_folder else None
@@ -73,8 +75,14 @@ class DatasetParser:
         )
 
     def parse(self):
+        if self.status_callback:
+            self.status_callback("Validating inputs...")
+
         self._validate_train_inputs()
         self._validate_test_inputs()
+
+        if self.status_callback:
+            self.status_callback("Parsing train dataset...")
 
         train_df = pd.read_csv(self.train_csv_file)
 
@@ -90,6 +98,9 @@ class DatasetParser:
             image_folder=self.train_image_folder,
             image_column=train_detected_columns["image"],
         )
+
+        if self.status_callback:
+            self.status_callback("Checking train duplicates...")
 
         train_duplicate_analysis = (
             PHashDuplicateAnalyzer().analyze(
@@ -115,6 +126,9 @@ class DatasetParser:
         }
 
         if self.test_image_folder and self.test_csv_file:
+            if self.status_callback:
+                self.status_callback("Parsing test dataset...")
+
             test_df = pd.read_csv(self.test_csv_file)
 
             test_detected_columns = self._detect_columns(test_df)
@@ -130,12 +144,18 @@ class DatasetParser:
                 image_column=test_detected_columns["image"],
             )
 
+            if self.status_callback:
+                self.status_callback("Checking test duplicates...")
+
             test_duplicate_analysis = (
                 PHashDuplicateAnalyzer().analyze(
                     image_folder=self.test_image_folder,
                     threshold=self.phash_threshold,
                 )
             )
+
+            if self.status_callback:
+                self.status_callback("Checking train-test leakage...")
 
             leakage_analysis = PHashLeakageAnalyzer().analyze(
                 train_image_folder=self.train_image_folder,
@@ -156,6 +176,9 @@ class DatasetParser:
             }
 
             result["leakage"] = leakage_analysis
+
+        if self.status_callback:
+            self.status_callback("Finalizing audit...")
 
         return result
 
