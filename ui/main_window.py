@@ -464,6 +464,10 @@ class MainWindow(QMainWindow):
             self._export_leakage_csv_results
         )
 
+        self.export_html_button.clicked.connect(
+            self._export_html_report
+        )
+
     def _select_train_image_folder(self):
         folder_path = QFileDialog.getExistingDirectory(
             self,
@@ -570,6 +574,8 @@ class MainWindow(QMainWindow):
                     f"Analysis could not start.\n\n{error}"
                 )
                 return
+            
+            self.analysis_result = result
 
             test_image_count = (
                 result["test"]["num_rows"]
@@ -798,6 +804,8 @@ class MainWindow(QMainWindow):
                     result["leakage"]
                 )
 
+            self.export_html_button.setEnabled(True)
+
             self.export_train_csv_button.setEnabled(True)
 
             self.export_test_csv_button.setEnabled(
@@ -844,6 +852,427 @@ class MainWindow(QMainWindow):
             return int(value)
 
         return value
+
+    def _export_html_report(self):
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export HTML Report",
+            "visionaudit_report.html",
+            "HTML Files (*.html)",
+        )
+
+        if not file_path:
+            return
+
+        result = self.analysis_result
+
+        test_details_html = ""
+
+        test_distribution_html = ""
+
+        test_imbalance_html = ""
+
+        test_duplicate_summary_html = ""
+
+        leakage_summary_html = ""
+
+        if result["leakage"] is not None:
+            confirmed_leakage = sum(
+                1
+                for review in self.leakage_review_state.values()
+                if review["checkbox"].isChecked()
+            )
+
+            leakage_summary_html = f"""
+    <hr>
+
+    <h3>Train–Test Leakage Summary</h3>
+
+    <p>
+        Detected leakage groups:
+        {result["leakage"]["leakage_group_count"]}
+    </p>
+
+    <p>
+        Included leakage groups after review:
+        {confirmed_leakage}
+    </p>
+"""
+
+        if result["test"] is not None:
+            test_details_html = f"""
+    <hr>
+
+    <h3>Test Dataset Details</h3>
+
+    <p>Rows: {result["test"]["num_rows"]}</p>
+
+    <p>
+        Detected image column:
+        {result["test"]["detected_columns"]["image"] or "Not detected"}
+    </p>
+
+    <p>
+        Detected label column:
+        {result["test"]["detected_columns"]["label"] or "Not detected"}
+    </p>
+
+    <p>
+        Images in folder:
+        {result["test"]["image_check"]["folder_image_count"]}
+    </p>
+
+    <p>
+        Images referenced in CSV:
+        {result["test"]["image_check"]["csv_image_count"]}
+    </p>
+
+    <p>
+        Missing images:
+        {len(result["test"]["image_check"]["missing_images"])}
+    </p>
+
+    <p>
+        Unused images:
+        {len(result["test"]["image_check"]["unused_images"])}
+    </p>
+
+    <p>
+        Image consistency status:
+        {result["test"]["image_check"]["status"]}
+    </p>
+
+    <p>
+        Number of classes:
+        {result["test"]["statistics"]["num_classes"]}
+    </p>
+"""
+    
+            test_distribution = result["test"][
+                "statistics"
+            ]["class_distribution"]
+
+            test_distribution_rows = ""
+
+            for label, count in test_distribution.items():
+                test_distribution_rows += (
+                    f"<tr>"
+                    f"<td>{label}</td>"
+                    f"<td>{count}</td>"
+                    f"</tr>"
+                )
+
+            test_distribution_html = f"""
+    <hr>
+
+    <h3>Test Class Distribution</h3>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Class</th>
+                <th>Count</th>
+            </tr>
+        </thead>
+        <tbody>
+            {test_distribution_rows}
+        </tbody>
+    </table>
+"""
+            
+            test_statistics = result["test"]["statistics"]
+
+            test_imbalance_ratio = test_statistics["imbalance_ratio"]
+
+            test_imbalance_text = (
+                f"{test_imbalance_ratio:.2f}"
+                if test_imbalance_ratio is not None
+                else "Not applicable"
+            )
+
+            test_imbalance_status = test_statistics["imbalance_status"]
+
+            test_imbalance_html = f"""
+    <hr>
+
+    <h3>Test Class Imbalance</h3>
+
+    <p>Imbalance ratio: {test_imbalance_text}</p>
+    <p>Class balance: {test_imbalance_status}</p>
+"""
+            
+            test_confirmed_duplicates = sum(
+                1
+                for review in self.duplicate_review_state["test"].values()
+                if review["checkbox"].isChecked()
+            )
+
+            test_duplicate_summary_html = f"""
+    <hr>
+
+    <h3>Test Duplicate Summary</h3>
+
+    <p>
+        Detected duplicate groups:
+        {result["test"]["duplicates"]["duplicate_group_count"]}
+    </p>
+
+    <p>
+        Included duplicate groups after review:
+        {test_confirmed_duplicates}
+    </p>
+"""
+            
+        train_distribution = result["train"][
+            "statistics"
+        ]["class_distribution"]
+
+        train_distribution_rows = ""
+
+        for label, count in train_distribution.items():
+            train_distribution_rows += (
+                f"<tr>"
+                f"<td>{label}</td>"
+                f"<td>{count}</td>"
+                f"</tr>"
+            )
+
+        train_distribution_html = f"""
+    <hr>
+
+    <h3>Train Class Distribution</h3>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Class</th>
+                <th>Count</th>
+            </tr>
+        </thead>
+        <tbody>
+            {train_distribution_rows}
+        </tbody>
+    </table>
+"""
+
+        train_statistics = result["train"]["statistics"]
+
+        train_imbalance_ratio = train_statistics["imbalance_ratio"]
+
+        train_imbalance_text = (
+            f"{train_imbalance_ratio:.2f}"
+            if train_imbalance_ratio is not None
+            else "Not applicable"
+        )
+
+        train_imbalance_status = train_statistics["imbalance_status"]
+
+        train_imbalance_html = f"""
+    <hr>
+
+    <h3>Train Class Imbalance</h3>
+
+    <p>Imbalance ratio: {train_imbalance_text}</p>
+    <p>Class balance: {train_imbalance_status}</p>
+"""
+
+        train_confirmed_duplicates = sum(
+            1
+            for review in self.duplicate_review_state["train"].values()
+            if review["checkbox"].isChecked()
+        )
+
+        train_duplicate_summary_html = f"""
+    <hr>
+
+    <h3>Train Duplicate Summary</h3>
+
+    <p>
+        Detected duplicate groups:
+        {result["train"]["duplicates"]["duplicate_group_count"]}
+    </p>
+
+    <p>
+        Included duplicate groups after review:
+        {train_confirmed_duplicates}
+    </p>
+"""
+
+        train_image_count = result["train"]["num_rows"]
+
+        test_image_count = (
+            result["test"]["num_rows"]
+            if result["test"] is not None
+            else 0
+        )
+
+        train_duplicate_count = result["train"][
+            "duplicates"
+        ]["duplicate_group_count"]
+
+        test_duplicate_count = (
+            result["test"]["duplicates"]["duplicate_group_count"]
+            if result["test"] is not None
+            else 0
+        )
+
+        leakage_count = (
+            result["leakage"]["leakage_group_count"]
+            if result["leakage"] is not None
+            else 0
+        )
+
+        html_content = f"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>VisionAudit Dataset Audit Report</title>
+
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+            background-color: #f5f7fb;
+            color: #253047;
+            line-height: 1.6;
+            max-width: 960px;
+            margin: 40px auto;
+            padding: 32px;
+        }}
+
+        h1 {{
+            color: #263b70;
+            font-size: 30px;
+            margin-bottom: 8px;
+        }}
+
+        h2, h3 {{
+            color: #344b80;
+            margin-top: 28px;
+            margin-bottom: 12px;
+        }}
+
+        p {{
+            margin: 8px 0;
+        }}
+
+        hr {{
+            border: none;
+            border-top: 1px solid #dce2ec;
+            margin: 28px 0;
+        }}
+
+        table {{
+            width: 100%;
+            border-collapse: collapse;
+            background-color: #ffffff;
+            margin-top: 12px;
+            margin-bottom: 24px;
+        }}
+
+        th, td {{
+            padding: 11px 14px;
+            text-align: left;
+            border-bottom: 1px solid #e5e9f0;
+        }}
+
+        th {{
+            background-color: #e9eef9;
+            color: #263b70;
+            font-weight: 600;
+        }}
+
+        tr:nth-child(even) {{
+            background-color: #f8faff;
+        }}
+    </style>
+
+</head>
+<body>
+    <h1>VisionAudit</h1>
+    <h2>Dataset Audit Report</h2>
+
+    <h3>Dataset Audit Overview</h3>
+
+    <p>Train images: {train_image_count}</p>
+    <p>Test images: {test_image_count}</p>
+    <p>Train duplicate groups: {train_duplicate_count}</p>
+    <p>Test duplicate groups: {test_duplicate_count}</p>
+    <p>Train-test leakage groups: {leakage_count}</p>
+
+    <hr>
+
+    <h3>Train Dataset Details</h3>
+
+    <p>Rows: {result["train"]["num_rows"]}</p>
+
+    <p>
+        Detected image column:
+        {result["train"]["detected_columns"]["image"] or "Not detected"}
+    </p>
+
+    <p>
+        Detected label column:
+        {result["train"]["detected_columns"]["label"] or "Not detected"}
+    </p>
+
+    <p>
+        Images in folder:
+        {result["train"]["image_check"]["folder_image_count"]}
+    </p>
+
+    <p>
+        Images referenced in CSV:
+        {result["train"]["image_check"]["csv_image_count"]}
+    </p>
+
+    <p>
+        Missing images:
+        {len(result["train"]["image_check"]["missing_images"])}
+    </p>
+
+    <p>
+        Unused images:
+        {len(result["train"]["image_check"]["unused_images"])}
+    </p>
+
+    <p>
+        Image consistency status:
+        {result["train"]["image_check"]["status"]}
+    </p>
+
+    <p>
+        Number of classes:
+        {result["train"]["statistics"]["num_classes"]}
+    </p>
+
+    {test_details_html}
+
+    {train_distribution_html}
+
+    {test_distribution_html}
+
+    {train_imbalance_html}
+
+    {test_imbalance_html}
+
+    {train_duplicate_summary_html}
+
+    {test_duplicate_summary_html}
+
+    {leakage_summary_html}
+
+</body>
+</html>
+"""
+
+        with open(
+            file_path,
+            "w",
+            encoding="utf-8",
+        ) as html_file:
+            html_file.write(html_content)
+
 
     def _export_train_csv_results(self):
         file_path, _ = QFileDialog.getSaveFileName(
